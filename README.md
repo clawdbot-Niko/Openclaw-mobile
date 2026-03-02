@@ -1,24 +1,34 @@
 # OpenClaw Mobile (APK) - Alpha
 
-Primer esqueleto de app Android completa para instalar y operar OpenClaw desde UI.
+APK Android con conexión real a Termux (bridge local HTTP).
 
-## Estado actual
-- Base Android + Jetpack Compose
-- Wizard inicial con botones de flujo:
-  - Instalar Linux + OpenClaw
-  - Detectar modelos
-  - Instalar fallback Ollama
-  - Instalar extras (whisper/tts)
+## Qué ya integra (alpha 0.2)
+- UI Android (Compose)
+- Botón de conexión real con Termux bridge (`/health`)
+- Instalador real por Termux (`/install/openclaw`)
+- Catálogo real de modelos (`openclaw models list`)
+- Envío de OAuth/API token a OpenClaw (`/auth`)
 
-## Siguiente paso inmediato
-Conectar cada botón a ejecución real en Termux (bridge por intent o localhost).
+## Preparación en Termux (una sola vez)
 
-## Build local (Android Studio)
-1. Abrir carpeta `openclaw-mobile/` en Android Studio Hedgehog+.
-2. Sincronizar Gradle.
-3. Run en dispositivo Android o emulador.
-4. Para APK debug:
-   - `Build > Build Bundle(s) / APK(s) > Build APK(s)`
+```bash
+pkg update -y
+pkg install -y git python
+cd ~
+git clone https://github.com/clawdbot-Niko/Openclaw-mobile.git openclaw-mobile
+cd openclaw-mobile/termux
+chmod +x *.sh
+./start_bridge.sh
+```
 
-APK de debug quedará en:
-`app/build/outputs/apk/debug/app-debug.apk`
+Esto levanta el bridge en `http://127.0.0.1:8765`.
+
+## Flujo en la app
+1. Probar conexión Termux
+2. Instalar Ubuntu/OpenClaw
+3. Cargar catálogo real
+4. Enviar OAuth/API
+
+## Build APK por GitHub Actions
+- Revisa Actions en el repo.
+- Descarga artifact `app-debug-apk`.
