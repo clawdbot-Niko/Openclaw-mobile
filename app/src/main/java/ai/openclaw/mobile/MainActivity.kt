@@ -1,6 +1,10 @@
 package ai.openclaw.mobile
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.os.Bundle
+import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.layout.Arrangement
@@ -36,7 +40,30 @@ import java.net.URL
 class MainActivity : ComponentActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
-    setContent { App() }
+    setContent { App(this) }
+  }
+}
+
+private fun startTermuxBridge(context: Context): String {
+  return try {
+    val bootstrap = "pkg update -y && pkg install -y git python && cd ~ && (test -d openclaw-mobile || git clone https://github.com/clawdbot-Niko/Openclaw-mobile.git openclaw-mobile) && cd ~/openclaw-mobile/termux && chmod +x *.sh && ./start_bridge.sh"
+    val i = Intent("com.termux.app.RUN_COMMAND").apply {
+      setPackage("com.termux")
+      putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+      putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", bootstrap))
+      putExtra("com.termux.RUN_COMMAND_BACKGROUND", false)
+      putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
+    }
+    context.startService(i)
+    "Abriendo Termux para crear bridge..."
+  } catch (e: Exception) {
+    try {
+      context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.termux")))
+    } catch (_: Exception) {
+      context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/com.termux/")))
+    }
+    Toast.makeText(context, "Instala/abre Termux para continuar", Toast.LENGTH_LONG).show()
+    "No se pudo ejecutar comando en Termux automáticamente"
   }
 }
 
@@ -71,7 +98,7 @@ private object TermuxBridgeClient {
 }
 
 @Composable
-fun App() {
+fun App(context: Context) {
   var status by remember { mutableStateOf("Listo") }
   var models by remember { mutableStateOf("Sin cargar") }
   var provider by remember { mutableStateOf("openai-codex") }
@@ -94,6 +121,12 @@ fun App() {
           Text("Estado: $status")
           Text("Modelos: $models")
         }
+      }
+
+      Button(onClick = {
+        status = startTermuxBridge(context)
+      }, modifier = Modifier.fillMaxWidth()) {
+        Text("Crear bridge automáticamente (Termux)")
       }
 
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
