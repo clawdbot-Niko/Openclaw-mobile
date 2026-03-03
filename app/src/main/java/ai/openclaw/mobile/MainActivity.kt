@@ -132,7 +132,7 @@ private object TermuxBridgeClient {
 
 @Composable
 fun App(context: Context) {
-  var status by remember { mutableStateOf("Listo") }
+  var status by remember { mutableStateOf("Paso 1/2: toca 'Crear bridge'. Si instala Termux, vuelve y toca de nuevo.") }
   var models by remember { mutableStateOf("Sin cargar") }
   var provider by remember { mutableStateOf("openai-codex") }
   var token by remember { mutableStateOf("") }
@@ -161,6 +161,7 @@ fun App(context: Context) {
       }, modifier = Modifier.fillMaxWidth()) {
         Text("Crear bridge automáticamente (Termux)")
       }
+      Text("Si Termux se acaba de instalar: regresa aquí y vuelve a tocar el botón.")
 
       Row(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.fillMaxWidth()) {
         Button(onClick = {
