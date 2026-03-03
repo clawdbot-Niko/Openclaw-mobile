@@ -88,8 +88,9 @@ private fun isInstalled(context: Context, pkg: String): Boolean {
 
 private fun openTermuxInstallPage(context: Context) {
   val links = listOf(
-    "market://details?id=com.termux",
     "https://f-droid.org/packages/com.termux/",
+    "market://details?id=org.fdroid.fdroid",
+    "https://f-droid.org/",
     "https://github.com/termux/termux-app/releases"
   )
   for (url in links) {
