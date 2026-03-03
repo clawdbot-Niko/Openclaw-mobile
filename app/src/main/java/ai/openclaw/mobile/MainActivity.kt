@@ -74,11 +74,16 @@ private enum class SetupStep {
   DONE
 }
 
-private fun isInstalled(context: Context, pkg: String): Boolean = try {
-  context.packageManager.getPackageInfo(pkg, 0)
-  true
-} catch (_: PackageManager.NameNotFoundException) {
-  false
+private fun isInstalled(context: Context, pkg: String): Boolean {
+  val pm = context.packageManager
+  val byLaunchIntent = pm.getLaunchIntentForPackage(pkg) != null
+  if (byLaunchIntent) return true
+  return try {
+    pm.getPackageInfo(pkg, 0)
+    true
+  } catch (_: PackageManager.NameNotFoundException) {
+    false
+  }
 }
 
 private fun openTermuxInstallPage(context: Context) {
