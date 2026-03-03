@@ -2,6 +2,7 @@ package ai.openclaw.mobile
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
 import android.widget.Toast
@@ -44,26 +45,58 @@ class MainActivity : ComponentActivity() {
   }
 }
 
+private fun isInstalled(context: Context, pkg: String): Boolean = try {
+  context.packageManager.getPackageInfo(pkg, 0)
+  true
+} catch (_: PackageManager.NameNotFoundException) {
+  false
+}
+
+private fun openTermuxInstallPage(context: Context) {
+  val links = listOf(
+    "market://details?id=com.termux",
+    "https://f-droid.org/packages/com.termux/",
+    "https://github.com/termux/termux-app/releases"
+  )
+  for (url in links) {
+    try {
+      context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+      })
+      return
+    } catch (_: Exception) {}
+  }
+}
+
 private fun startTermuxBridge(context: Context): String {
+  if (!isInstalled(context, "com.termux")) {
+    openTermuxInstallPage(context)
+    return "Termux no está instalado. Te abrí la descarga."
+  }
+
+  val bootstrap = "pkg update -y && pkg install -y git python && cd ~ && (test -d openclaw-mobile || git clone https://github.com/clawdbot-Niko/Openclaw-mobile.git openclaw-mobile) && cd ~/openclaw-mobile/termux && chmod +x *.sh && ./start_bridge.sh"
+
   return try {
-    val bootstrap = "pkg update -y && pkg install -y git python && cd ~ && (test -d openclaw-mobile || git clone https://github.com/clawdbot-Niko/Openclaw-mobile.git openclaw-mobile) && cd ~/openclaw-mobile/termux && chmod +x *.sh && ./start_bridge.sh"
-    val i = Intent("com.termux.app.RUN_COMMAND").apply {
+    // Intenta lanzar comando directo en Termux
+    val runIntent = Intent("com.termux.app.RUN_COMMAND").apply {
       setPackage("com.termux")
       putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
       putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", bootstrap))
       putExtra("com.termux.RUN_COMMAND_BACKGROUND", false)
       putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
     }
-    context.startService(i)
-    "Abriendo Termux para crear bridge..."
+    context.startService(runIntent)
+    "Creando bridge en Termux..."
   } catch (e: Exception) {
+    // Fallback: abrir Termux por si requiere permiso de ejecución externa
     try {
-      context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("market://details?id=com.termux")))
-    } catch (_: Exception) {
-      context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://f-droid.org/packages/com.termux/")))
-    }
-    Toast.makeText(context, "Instala/abre Termux para continuar", Toast.LENGTH_LONG).show()
-    "No se pudo ejecutar comando en Termux automáticamente"
+      val launch = context.packageManager.getLaunchIntentForPackage("com.termux")
+      if (launch != null) {
+        context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+      }
+    } catch (_: Exception) {}
+    Toast.makeText(context, "Abre Termux y acepta ejecución externa si te la pide", Toast.LENGTH_LONG).show()
+    "Termux abierto. Si no inicia solo, reintenta el botón."
   }
 }
 
