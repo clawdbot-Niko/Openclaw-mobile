@@ -121,8 +121,17 @@ mkdir -p "${'$'}HOME/.termux"
 echo "allow-external-apps=true" >> "${'$'}HOME/.termux/termux.properties"
 termux-reload-settings >/dev/null 2>&1 || true
 
+# Ensure we have a known-good mirror configured (avoids interactive termux-change-repo)
+mkdir -p "${'$'}PREFIX/etc/apt"
+echo "deb https://packages-cf.termux.dev/apt/termux-main/ stable main" > "${'$'}PREFIX/etc/apt/sources.list"
+
+# Bring the base system fully up to date (fixes curl/OpenSSL/QUIC symbol issues)
+apt update -y
+apt full-upgrade -y
+
 pkg update -y
-pkg install -y python curl tar termux-tools
+pkg install -y python curl tar termux-tools ca-certificates openssl
+pkg reinstall -y openssl curl libcurl || true
 
 # Fetch repo without git credentials/prompts (works for public repos)
 rm -rf "${'$'}HOME/openclaw-mobile" || true
