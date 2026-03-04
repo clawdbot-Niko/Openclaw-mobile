@@ -167,7 +167,7 @@ def worker_install_all():
     state['phase']='openclaw'
     state['detail']='Instalando OpenClaw'
     setp('openclaw', 15)
-    c,o,e = run('curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard', 1800)
+    c,o,e = run('pkg install -y nodejs-lts git cmake make clang pkg-config; npm config delete jobs || true; npm_config_jobs=4 npm i -g openclaw@latest --loglevel=error --no-fund --no-audit', 2400)
     if c!=0:
       state.update({'running':False,'phase':'error','detail':compact_error(e)}); return
     setp('openclaw', 70)
