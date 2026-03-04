@@ -119,7 +119,7 @@ pkg uninstall -y nodejs || true
 mkdir -p ~/openclaw-mobile/termux
 cat > ~/openclaw-mobile/termux/bridge_server.py <<'PY'
 #!/usr/bin/env python3
-import json, subprocess, threading
+import json, subprocess, threading, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 state = {
@@ -142,10 +142,24 @@ def add_log(msg):
 
 def run(cmd, timeout=1800):
     add_log(f'$ {cmd}')
-    p = subprocess.run(cmd, shell=True, text=True, capture_output=True, timeout=timeout)
-    if p.stdout: add_log(p.stdout.strip())
-    if p.stderr: add_log(p.stderr.strip())
-    return p.returncode, (p.stdout or '').strip(), (p.stderr or '').strip()
+    p = subprocess.Popen(cmd, shell=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    out_lines = []
+    start = time.time()
+    while True:
+      line = p.stdout.readline() if p.stdout else ''
+      if line:
+        s = line.rstrip('\n')
+        out_lines.append(s)
+        add_log(s)
+      if p.poll() is not None:
+        break
+      if time.time() - start > timeout:
+        p.kill()
+        add_log('TIMEOUT')
+        return 124, '\n'.join(out_lines), 'timeout'
+    code = p.returncode or 0
+    out = '\n'.join(out_lines)
+    return code, out, '' if code == 0 else out
 
 def setp(target, pct):
     state[target]['percent'] = max(0, min(100, int(pct)))
@@ -170,12 +184,20 @@ def worker_install_all():
     setp('ubuntu', 100)
 
     state['phase']='openclaw'
-    state['detail']='Instalando OpenClaw'
+    state['detail']='Preparando Ubuntu para OpenClaw'
     setp('openclaw', 15)
-    c,o,e = run('proot-distro login ubuntu -- bash -lc "apt update && apt install -y curl ca-certificates git build-essential cmake pkg-config && curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard"', 3600)
+    c,o,e = run('proot-distro login ubuntu -- bash -lc "export DEBIAN_FRONTEND=noninteractive; apt update; apt install -y curl ca-certificates git build-essential cmake pkg-config"', 2400)
     if c!=0:
       state.update({'running':False,'phase':'error','detail':compact_error(e)}); return
-    setp('openclaw', 70)
+
+    state['detail']='Instalando OpenClaw (puede tardar varios minutos)'
+    setp('openclaw', 45)
+    c,o,e = run('proot-distro login ubuntu -- bash -lc "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard"', 3600)
+    if c!=0:
+      state.update({'running':False,'phase':'error','detail':compact_error(e)}); return
+
+    state['detail']='Configurando OpenClaw'
+    setp('openclaw', 80)
     c,o,e = run('proot-distro login ubuntu -- bash -lc "openclaw configure --mode local || true"', 1200)
     setp('openclaw', 100)
 
