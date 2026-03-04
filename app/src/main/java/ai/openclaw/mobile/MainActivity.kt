@@ -1,5 +1,7 @@
 package ai.openclaw.mobile
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -178,18 +180,17 @@ echo BRIDGE_STARTED
 
 private fun launchBridgeBootstrapInTermux(context: Context): String {
   val bootstrap = bridgeBootstrapCommand()
-  return try {
-    val runIntent = Intent("com.termux.app.RUN_COMMAND").apply {
-      setPackage("com.termux")
-      putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
-      putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", bootstrap))
-      putExtra("com.termux.RUN_COMMAND_BACKGROUND", false)
-      putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
-    }
-    context.startService(runIntent)
-    "Inicializando bridge en Termux..."
-  } catch (_: Exception) {
-    "No se pudo lanzar RUN_COMMAND. Abre Termux y vuelve a intentar."
+
+  // Always copy command and open Termux so user can see full real logs.
+  val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+  cm.setPrimaryClip(ClipData.newPlainText("termux_bridge_bootstrap", bootstrap))
+
+  val launch = context.packageManager.getLaunchIntentForPackage("com.termux")
+  return if (launch != null) {
+    context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    "Comando copiado. En Termux pega y ejecuta para ver log real (long-press > Paste)."
+  } else {
+    "No se encontró Termux. Instálalo primero."
   }
 }
 
