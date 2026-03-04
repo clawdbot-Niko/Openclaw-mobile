@@ -6,9 +6,10 @@ APK Android con conexión real a Termux (bridge local HTTP).
 - UI Android (Compose)
 - Botón de **autobridge**: intenta abrir/usar Termux y levantar bridge
 - Botón de conexión real con Termux bridge (`/health`)
-- Instalador real por Termux (`/install/openclaw`)
-- Catálogo real de modelos (`openclaw models list`)
-- Envío de OAuth/API token a OpenClaw (`/auth`)
+- Instalador completo (Ubuntu + OpenClaw) iniciado desde la app (`/install/all/start`)
+- Progreso por fases (`/progress`)
+- Logs en vivo tipo "espejo" de Termux (stream incremental via `/logs?offset=...`)
+- Descarga de logs completos (`/logs/download`)
 
 ## Preparación en Termux (una sola vez)
 

@@ -60,7 +60,7 @@ private object TermuxBridgeClient {
   suspend fun health(): String = get("/health")
   suspend fun installAllStart(): String = post("/install/all/start", "{}")
   suspend fun progress(): JSONObject = JSONObject(get("/progress"))
-  suspend fun logs(): String = get("/logs")
+  suspend fun logs(offset: Long): JSONObject = JSONObject(get("/logs?offset=$offset"))
 
   private suspend fun get(path: String): String = withContext(Dispatchers.IO) {
     val conn = URL(base + path).openConnection() as HttpURLConnection
@@ -107,129 +107,29 @@ private fun openTermuxInstallPage(context: Context) {
 }
 
 private fun bridgeBootstrapCommand(): String = """
-# hard reset previous bridge/session
-pkill -9 -f bridge_server.py >/dev/null 2>&1 || true
-rm -f ~/openclaw-mobile/termux/bridge.log ~/openclaw-mobile/termux/bridge_server.py >/dev/null 2>&1 || true
+# OpenClaw Mobile bootstrap (Termux)
+# - installs minimal deps
+# - clones/updates the repo under ~/openclaw-mobile
+# - starts the bridge server (logs persisted to ~/openclaw-mobile/termux/install.log)
+
+set -e
 
 pkg update -y
-apt full-upgrade -y || pkg upgrade -y
-pkg install -y python proot-distro git cmake make clang pkg-config curl
-pkg install -y nodejs-lts
-pkg uninstall -y nodejs || true
-mkdir -p ~/openclaw-mobile/termux
-cat > ~/openclaw-mobile/termux/bridge_server.py <<'PY'
-#!/usr/bin/env python3
-import json, subprocess, threading, time
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+pkg install -y python git
 
-state = {
-  'running': False,
-  'phase': 'idle',
-  'detail': '',
-  'bridge': {'percent': 100},
-  'ubuntu': {'percent': 0},
-  'openclaw': {'percent': 0},
-  'logs': []
-}
+if [ ! -d "$HOME/openclaw-mobile/.git" ]; then
+  rm -rf "$HOME/openclaw-mobile" || true
+  git clone https://github.com/clawdbot-Niko/Openclaw-mobile.git "$HOME/openclaw-mobile"
+else
+  cd "$HOME/openclaw-mobile"
+  git pull --rebase || true
+fi
 
-def add_log(msg):
-    try:
-      state['logs'].append(str(msg))
-      if len(state['logs']) > 300:
-        state['logs'] = state['logs'][-300:]
-    except Exception:
-      pass
+cd "$HOME/openclaw-mobile/termux"
 
-def run(cmd, timeout=1800):
-    add_log(f'$ {cmd}')
-    p = subprocess.Popen(cmd, shell=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    out_lines = []
-    start = time.time()
-    while True:
-      line = p.stdout.readline() if p.stdout else ''
-      if line:
-        s = line.rstrip('\n')
-        out_lines.append(s)
-        add_log(s)
-      if p.poll() is not None:
-        break
-      if time.time() - start > timeout:
-        p.kill()
-        add_log('TIMEOUT')
-        return 124, '\n'.join(out_lines), 'timeout'
-    code = p.returncode or 0
-    out = '\n'.join(out_lines)
-    return code, out, '' if code == 0 else out
-
-def setp(target, pct):
-    state[target]['percent'] = max(0, min(100, int(pct)))
-
-def compact_error(err_text):
-    lines = [ln.strip() for ln in (err_text or '').splitlines() if ln.strip()]
-    npm_err = [ln for ln in lines if ('npm ERR' in ln or 'npm error' in ln.lower())]
-    if npm_err:
-      return ' | '.join(npm_err[-4:])[:500]
-    return ' | '.join(lines[-4:])[:500]
-
-def worker_install_all():
-    state['running']=True
-    state['phase']='ubuntu'
-    state['detail']='Instalando Ubuntu'
-    setp('ubuntu', 10)
-    c,o,e = run('pkg install -y proot-distro', 1200)
-    if c!=0:
-      state.update({'running':False,'phase':'error','detail':compact_error(e)}); return
-    setp('ubuntu', 35)
-    c,o,e = run('proot-distro install ubuntu || true', 3600)
-    setp('ubuntu', 100)
-
-    state['phase']='openclaw'
-    state['detail']='Preparando Ubuntu para OpenClaw'
-    setp('openclaw', 15)
-    c,o,e = run('proot-distro login ubuntu -- bash -lc "export DEBIAN_FRONTEND=noninteractive; apt update; apt install -y curl ca-certificates git build-essential cmake pkg-config"', 2400)
-    if c!=0:
-      state.update({'running':False,'phase':'error','detail':compact_error(e)}); return
-
-    state['detail']='Instalando OpenClaw (puede tardar varios minutos)'
-    setp('openclaw', 45)
-    c,o,e = run('proot-distro login ubuntu -- bash -lc "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard"', 3600)
-    if c!=0:
-      state.update({'running':False,'phase':'error','detail':compact_error(e)}); return
-
-    state['detail']='Configurando OpenClaw'
-    setp('openclaw', 80)
-    c,o,e = run('proot-distro login ubuntu -- bash -lc "openclaw configure --mode local || true"', 1200)
-    setp('openclaw', 100)
-
-    state.update({'running':False,'phase':'done','detail':'Ubuntu + OpenClaw listos'})
-
-class H(BaseHTTPRequestHandler):
-    def sendj(self, code, payload):
-        d = json.dumps(payload).encode()
-        self.send_response(code)
-        self.send_header('Content-Type', 'application/json')
-        self.send_header('Content-Length', str(len(d)))
-        self.end_headers()
-        self.wfile.write(d)
-
-    def do_GET(self):
-        if self.path == '/health': return self.sendj(200, {'ok': True, 'service': 'termux-bridge'})
-        if self.path == '/progress': return self.sendj(200, state)
-        if self.path == '/logs': return self.sendj(200, {'ok': True, 'logs': '\n'.join(state.get('logs', []))})
-        return self.sendj(404, {'error':'not_found'})
-
-    def do_POST(self):
-        if self.path == '/install/all/start':
-            if state.get('running'): return self.sendj(200, {'ok':True,'message':'already_running'})
-            threading.Thread(target=worker_install_all, daemon=True).start()
-            return self.sendj(200, {'ok':True,'message':'started'})
-        return self.sendj(404, {'error':'not_found'})
-
-ThreadingHTTPServer(('127.0.0.1',8765), H).serve_forever()
-PY
-chmod +x ~/openclaw-mobile/termux/bridge_server.py
 pkill -f bridge_server.py >/dev/null 2>&1 || true
-nohup python ~/openclaw-mobile/termux/bridge_server.py > ~/openclaw-mobile/termux/bridge.log 2>&1 &
+nohup python bridge_server.py >/dev/null 2>&1 &
+
 echo BRIDGE_STARTED
 """.trimIndent()
 
@@ -329,13 +229,22 @@ fun App(context: Context) {
 
   LaunchedEffect(Unit) { refreshStep() }
 
-  LaunchedEffect(step) {
+  var logOffset by remember { mutableStateOf(0L) }
+
+  LaunchedEffect(Unit) {
     while (true) {
       try {
-        val j = JSONObject(TermuxBridgeClient.logs())
-        logsText = j.optString("logs", logsText)
-      } catch (_: Exception) {}
-      delay(2000)
+        val j = TermuxBridgeClient.logs(logOffset)
+        val text = j.optString("text", "")
+        val next = j.optLong("nextOffset", logOffset)
+        if (text.isNotEmpty()) {
+          logsText = (logsText + text).takeLast(2_000_000) // keep UI bounded; full log is on device
+        }
+        logOffset = next
+      } catch (_: Exception) {
+        // ignore
+      }
+      delay(1500)
     }
   }
 
