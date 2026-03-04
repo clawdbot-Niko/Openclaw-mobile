@@ -108,7 +108,7 @@ private fun openTermuxInstallPage(context: Context) {
 
 private fun bridgeBootstrapCommand(): String = """
 pkg update -y
-pkg install -y python nodejs proot-distro git
+pkg install -y python nodejs proot-distro git cmake make clang pkg-config
 mkdir -p ~/openclaw-mobile/termux
 cat > ~/openclaw-mobile/termux/bridge_server.py <<'PY'
 #!/usr/bin/env python3
