@@ -201,6 +201,7 @@ fun App(context: Context) {
   var pBridge by remember { mutableFloatStateOf(0f) }
   var pUbuntu by remember { mutableFloatStateOf(0f) }
   var pOpenclaw by remember { mutableFloatStateOf(0f) }
+  var showRestartBridge by remember { mutableStateOf(false) }
 
   fun buttonLabel(s: SetupStep) = when (s) {
     SetupStep.DOWNLOAD_TERMUX -> "1) Descargar Termux"
@@ -215,6 +216,7 @@ fun App(context: Context) {
         step = SetupStep.DOWNLOAD_TERMUX
         status = "No se detecta Termux"
         pBridge = 0f
+        showRestartBridge = false
         return@launch
       }
       val up = try { TermuxBridgeClient.health(); true } catch (_: Exception) { false }
@@ -222,11 +224,13 @@ fun App(context: Context) {
         step = SetupStep.CREATE_BRIDGE
         status = "Termux detectado, bridge no activo"
         pBridge = 0.35f
+        showRestartBridge = true
         return@launch
       }
       pBridge = 1f
       step = SetupStep.INSTALL_STACK
       status = "Bridge activo ✅"
+      showRestartBridge = false
     }
   }
 
@@ -265,6 +269,7 @@ fun App(context: Context) {
             status = "Te abrí F-Droid/Termux"
           }
           SetupStep.CREATE_BRIDGE -> {
+            showRestartBridge = false
             status = launchBridgeBootstrapInTermux(context)
             scope.launch {
               repeat(20) { i ->
@@ -279,6 +284,7 @@ fun App(context: Context) {
                 }
               }
               status = "Bridge no activo aún. Reabre Termux y reintenta."
+              showRestartBridge = true
             }
           }
           SetupStep.INSTALL_STACK -> {
@@ -303,13 +309,16 @@ fun App(context: Context) {
                   if (!p.optBoolean("running", false) && phase == "error") {
                     step = SetupStep.CREATE_BRIDGE
                     status = "Error instalación: $detail (recrea bridge)"
+                    showRestartBridge = true
                     return@launch
                   }
                 }
                 status = "Timeout leyendo progreso"
+                showRestartBridge = true
               } catch (e: Exception) {
                 step = SetupStep.CREATE_BRIDGE
                 status = "Error instalación: ${e.message}"
+                showRestartBridge = true
               }
             }
           }
@@ -317,6 +326,17 @@ fun App(context: Context) {
         }
       }, modifier = Modifier.fillMaxWidth()) {
         Text(buttonLabel(step))
+      }
+
+      if (showRestartBridge) {
+        Button(onClick = {
+          status = launchBridgeBootstrapInTermux(context)
+          step = SetupStep.CREATE_BRIDGE
+          pBridge = 0.4f
+          showRestartBridge = false
+        }, modifier = Modifier.fillMaxWidth()) {
+          Text("Reiniciar bridge")
+        }
       }
 
       Button(onClick = { refreshStep() }, modifier = Modifier.fillMaxWidth()) {
