@@ -109,8 +109,53 @@ private fun openTermuxInstallPage(context: Context) {
   }
 }
 
-private fun bridgeBootstrapCommand(): String =
-  "pkg update -y && pkg install -y git python && cd ~ && (test -d openclaw-mobile || git clone https://github.com/clawdbot-Niko/Openclaw-mobile.git openclaw-mobile) && cd ~/openclaw-mobile/termux && chmod +x *.sh && ./start_bridge.sh"
+private fun bridgeBootstrapCommand(): String = """
+pkg update -y
+pkg install -y python nodejs
+mkdir -p ~/openclaw-mobile/termux
+cat > ~/openclaw-mobile/termux/bridge_server.py <<'PY'
+#!/usr/bin/env python3
+import json, subprocess
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+def run(cmd, timeout=120):
+    p = subprocess.run(cmd, shell=True, text=True, capture_output=True, timeout=timeout)
+    return p.returncode, (p.stdout or '').strip(), (p.stderr or '').strip()
+
+class H(BaseHTTPRequestHandler):
+    def sendj(self, code, payload):
+        d = json.dumps(payload).encode()
+        self.send_response(code)
+        self.send_header('Content-Type', 'application/json')
+        self.send_header('Content-Length', str(len(d)))
+        self.end_headers()
+        self.wfile.write(d)
+    def do_GET(self):
+        if self.path == '/health': return self.sendj(200, {'ok': True, 'service': 'termux-bridge'})
+        if self.path == '/models':
+            c,o,e = run('openclaw models list', 60)
+            return self.sendj(200 if c==0 else 500, {'ok': c==0, 'output': o, 'error': e})
+        return self.sendj(404, {'error':'not_found'})
+    def do_POST(self):
+        n = int(self.headers.get('Content-Length','0'))
+        b = json.loads(self.rfile.read(n).decode() if n else '{}')
+        if self.path == '/install/openclaw':
+            cmd = 'npm i -g @openclaw/cli || npm i -g openclaw; openclaw configure --mode local || true; echo OK'
+            c,o,e = run(cmd, 1200)
+            return self.sendj(200 if c==0 else 500, {'ok': c==0, 'output': o[-4000:], 'error': e[-2000:]})
+        if self.path == '/auth':
+            provider=(b.get('provider') or '').strip(); token=(b.get('token') or '').strip()
+            if not provider or not token: return self.sendj(400, {'error':'provider_and_token_required'})
+            c,o,e = run(f'openclaw models auth paste-token --provider {provider} --token "{token.replace(chr(34), "\\\"")}"', 180)
+            return self.sendj(200 if c==0 else 500, {'ok': c==0, 'output': o, 'error': e})
+        return self.sendj(404, {'error':'not_found'})
+
+HTTPServer(('127.0.0.1',8765), H).serve_forever()
+PY
+chmod +x ~/openclaw-mobile/termux/bridge_server.py
+nohup python ~/openclaw-mobile/termux/bridge_server.py >/data/data/com.termux/files/home/openclaw-mobile/termux/bridge.log 2>&1 &
+echo BRIDGE_STARTED
+""".trimIndent()
 
 private fun copyBridgeCommand(context: Context) {
   val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
