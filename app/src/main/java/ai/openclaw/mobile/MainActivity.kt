@@ -143,6 +143,13 @@ def run(cmd, timeout=1800):
 def setp(target, pct):
     state[target]['percent'] = max(0, min(100, int(pct)))
 
+def compact_error(err_text):
+    lines = [ln.strip() for ln in (err_text or '').splitlines() if ln.strip()]
+    npm_err = [ln for ln in lines if ('npm ERR' in ln or 'npm error' in ln.lower())]
+    if npm_err:
+      return ' | '.join(npm_err[-4:])[:500]
+    return ' | '.join(lines[-4:])[:500]
+
 def worker_install_all():
     state['running']=True
     state['phase']='ubuntu'
@@ -150,7 +157,7 @@ def worker_install_all():
     setp('ubuntu', 10)
     c,o,e = run('pkg install -y proot-distro', 1200)
     if c!=0:
-      state.update({'running':False,'phase':'error','detail':e[:300]}); return
+      state.update({'running':False,'phase':'error','detail':compact_error(e)}); return
     setp('ubuntu', 35)
     c,o,e = run('proot-distro install ubuntu || true', 3600)
     setp('ubuntu', 100)
@@ -160,7 +167,7 @@ def worker_install_all():
     setp('openclaw', 15)
     c,o,e = run('npm i -g openclaw --loglevel=error --no-fund --no-audit', 1800)
     if c!=0:
-      state.update({'running':False,'phase':'error','detail':e[:300]}); return
+      state.update({'running':False,'phase':'error','detail':compact_error(e)}); return
     setp('openclaw', 70)
     c,o,e = run('openclaw configure --mode local || true', 1200)
     setp('openclaw', 100)
@@ -302,8 +309,16 @@ fun App(context: Context) {
     }
   }
 
+  val pageScroll = rememberScrollState()
+
   MaterialTheme {
-    Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(
+      modifier = Modifier
+        .fillMaxSize()
+        .padding(16.dp)
+        .verticalScroll(pageScroll),
+      verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
       Image(
         painter = painterResource(id = R.drawable.lobsterd_logo),
         contentDescription = "logo",
