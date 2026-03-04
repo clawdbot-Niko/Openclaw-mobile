@@ -50,16 +50,15 @@ class MainActivity : ComponentActivity() {
 
 private object TermuxBridgeClient {
   private const val base = "http://127.0.0.1:8765"
-
   suspend fun health(): String = get("/health")
-  suspend fun installStart(): String = post("/install/openclaw/start", "{}")
+  suspend fun installAllStart(): String = post("/install/all/start", "{}")
   suspend fun progress(): JSONObject = JSONObject(get("/progress"))
 
   private suspend fun get(path: String): String = withContext(Dispatchers.IO) {
     val conn = URL(base + path).openConnection() as HttpURLConnection
     conn.requestMethod = "GET"
-    conn.connectTimeout = 3000
-    conn.readTimeout = 5000
+    conn.connectTimeout = 4000
+    conn.readTimeout = 6000
     conn.inputStream.bufferedReader().use(BufferedReader::readText)
   }
 
@@ -76,22 +75,12 @@ private object TermuxBridgeClient {
   }
 }
 
-private enum class SetupStep {
-  DOWNLOAD_TERMUX,
-  CREATE_BRIDGE,
-  INSTALL_OPENCLAW,
-  DONE
-}
+private enum class SetupStep { DOWNLOAD_TERMUX, CREATE_BRIDGE, INSTALL_STACK, DONE }
 
 private fun isInstalled(context: Context, pkg: String): Boolean {
   val pm = context.packageManager
   if (pm.getLaunchIntentForPackage(pkg) != null) return true
-  return try {
-    pm.getPackageInfo(pkg, 0)
-    true
-  } catch (_: PackageManager.NameNotFoundException) {
-    false
-  }
+  return try { pm.getPackageInfo(pkg, 0); true } catch (_: PackageManager.NameNotFoundException) { false }
 }
 
 private fun openTermuxInstallPage(context: Context) {
@@ -103,9 +92,7 @@ private fun openTermuxInstallPage(context: Context) {
   )
   for (url in links) {
     try {
-      context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply {
-        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-      })
+      context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) })
       return
     } catch (_: Exception) {}
   }
@@ -113,40 +100,52 @@ private fun openTermuxInstallPage(context: Context) {
 
 private fun bridgeBootstrapCommand(): String = """
 pkg update -y
-pkg install -y python nodejs
+pkg install -y python nodejs proot-distro
 mkdir -p ~/openclaw-mobile/termux
 cat > ~/openclaw-mobile/termux/bridge_server.py <<'PY'
 #!/usr/bin/env python3
 import json, subprocess, threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-status = {'running': False, 'percent': 0, 'phase': 'idle', 'detail': ''}
+state = {
+  'running': False,
+  'phase': 'idle',
+  'detail': '',
+  'bridge': {'percent': 100},
+  'ubuntu': {'percent': 0},
+  'openclaw': {'percent': 0}
+}
 
-def run(cmd, timeout=1200):
+def run(cmd, timeout=1800):
     p = subprocess.run(cmd, shell=True, text=True, capture_output=True, timeout=timeout)
     return p.returncode, (p.stdout or '').strip(), (p.stderr or '').strip()
 
-def set_status(percent, phase, detail='', running=True):
-    status.update({'running': running, 'percent': percent, 'phase': phase, 'detail': detail})
+def setp(target, pct):
+    state[target]['percent'] = max(0, min(100, int(pct)))
 
-def install_worker():
-    try:
-        set_status(5, 'starting', 'Preparando instalación')
-        steps = [
-            (15, 'node', 'pkg install -y nodejs npm'),
-            (40, 'openclaw-cli', 'npm i -g @openclaw/cli || npm i -g openclaw'),
-            (70, 'configure', 'openclaw configure --mode local || true'),
-            (100, 'done', 'echo OK')
-        ]
-        for pct, phase, cmd in steps:
-            c,o,e = run(cmd, 1200)
-            if c != 0:
-                set_status(pct, 'error', f'{phase}: {e[:300]}', False)
-                return
-            set_status(pct, phase, (o or e)[:200], True)
-        set_status(100, 'done', 'OpenClaw instalado', False)
-    except Exception as ex:
-        set_status(100, 'error', str(ex), False)
+def worker_install_all():
+    state['running']=True
+    state['phase']='ubuntu'
+    state['detail']='Instalando Ubuntu'
+    setp('ubuntu', 10)
+    c,o,e = run('pkg install -y proot-distro', 1200)
+    if c!=0:
+      state.update({'running':False,'phase':'error','detail':e[:300]}); return
+    setp('ubuntu', 35)
+    c,o,e = run('proot-distro install ubuntu || true', 3600)
+    setp('ubuntu', 100)
+
+    state['phase']='openclaw'
+    state['detail']='Instalando OpenClaw'
+    setp('openclaw', 15)
+    c,o,e = run('npm i -g @openclaw/cli || npm i -g openclaw', 1800)
+    if c!=0:
+      state.update({'running':False,'phase':'error','detail':e[:300]}); return
+    setp('openclaw', 70)
+    c,o,e = run('openclaw configure --mode local || true', 1200)
+    setp('openclaw', 100)
+
+    state.update({'running':False,'phase':'done','detail':'Ubuntu + OpenClaw listos'})
 
 class H(BaseHTTPRequestHandler):
     def sendj(self, code, payload):
@@ -158,32 +157,15 @@ class H(BaseHTTPRequestHandler):
         self.wfile.write(d)
 
     def do_GET(self):
-        if self.path == '/health':
-            return self.sendj(200, {'ok': True, 'service': 'termux-bridge'})
-        if self.path == '/progress':
-            return self.sendj(200, status)
-        if self.path == '/models':
-            c,o,e = run('openclaw models list', 120)
-            return self.sendj(200 if c==0 else 500, {'ok': c==0, 'output': o, 'error': e})
+        if self.path == '/health': return self.sendj(200, {'ok': True, 'service': 'termux-bridge'})
+        if self.path == '/progress': return self.sendj(200, state)
         return self.sendj(404, {'error':'not_found'})
 
     def do_POST(self):
-        n = int(self.headers.get('Content-Length','0'))
-        b = json.loads(self.rfile.read(n).decode() if n else '{}')
-
-        if self.path == '/install/openclaw/start':
-            if status.get('running'):
-                return self.sendj(200, {'ok': True, 'message': 'already_running'})
-            threading.Thread(target=install_worker, daemon=True).start()
-            return self.sendj(200, {'ok': True, 'message': 'started'})
-
-        if self.path == '/auth':
-            provider=(b.get('provider') or '').strip(); token=(b.get('token') or '').strip()
-            if not provider or not token:
-                return self.sendj(400, {'error':'provider_and_token_required'})
-            c,o,e = run(f'openclaw models auth paste-token --provider {provider} --token "{token.replace(chr(34), "\\\"")}"', 180)
-            return self.sendj(200 if c==0 else 500, {'ok': c==0, 'output': o, 'error': e})
-
+        if self.path == '/install/all/start':
+            if state.get('running'): return self.sendj(200, {'ok':True,'message':'already_running'})
+            threading.Thread(target=worker_install_all, daemon=True).start()
+            return self.sendj(200, {'ok':True,'message':'started'})
         return self.sendj(404, {'error':'not_found'})
 
 ThreadingHTTPServer(('127.0.0.1',8765), H).serve_forever()
@@ -207,9 +189,7 @@ private fun launchBridgeBootstrapInTermux(context: Context): String {
     context.startService(runIntent)
     "Inicializando bridge en Termux..."
   } catch (_: Exception) {
-    val launch = context.packageManager.getLaunchIntentForPackage("com.termux")
-    if (launch != null) context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    "Abre Termux y permite ejecución externa (RUN_COMMAND)"
+    "No se pudo lanzar RUN_COMMAND. Abre Termux y vuelve a intentar."
   }
 }
 
@@ -218,12 +198,14 @@ fun App(context: Context) {
   val scope = rememberCoroutineScope()
   var status by remember { mutableStateOf("Revisando estado...") }
   var step by remember { mutableStateOf(SetupStep.DOWNLOAD_TERMUX) }
-  var progress by remember { mutableFloatStateOf(0f) }
+  var pBridge by remember { mutableFloatStateOf(0f) }
+  var pUbuntu by remember { mutableFloatStateOf(0f) }
+  var pOpenclaw by remember { mutableFloatStateOf(0f) }
 
   fun buttonLabel(s: SetupStep) = when (s) {
     SetupStep.DOWNLOAD_TERMUX -> "1) Descargar Termux"
     SetupStep.CREATE_BRIDGE -> "2) Crear bridge con Termux"
-    SetupStep.INSTALL_OPENCLAW -> "3) Instalar Ubuntu + OpenClaw"
+    SetupStep.INSTALL_STACK -> "3) Instalar Ubuntu + OpenClaw"
     SetupStep.DONE -> "✅ Listo"
   }
 
@@ -231,48 +213,48 @@ fun App(context: Context) {
     scope.launch {
       if (!isInstalled(context, "com.termux")) {
         step = SetupStep.DOWNLOAD_TERMUX
-        progress = 0.05f
         status = "No se detecta Termux"
+        pBridge = 0f
         return@launch
       }
-      val bridgeUp = try {
-        TermuxBridgeClient.health()
-        true
-      } catch (_: Exception) { false }
-      if (!bridgeUp) {
+      val up = try { TermuxBridgeClient.health(); true } catch (_: Exception) { false }
+      if (!up) {
         step = SetupStep.CREATE_BRIDGE
-        progress = 0.33f
-        status = "Termux detectado, bridge aún no disponible"
+        status = "Termux detectado, bridge no activo"
+        pBridge = 0.35f
         return@launch
       }
-      step = SetupStep.INSTALL_OPENCLAW
-      progress = 0.66f
-      status = "Bridge activo. Instala OpenClaw"
+      pBridge = 1f
+      step = SetupStep.INSTALL_STACK
+      status = "Bridge activo ✅"
     }
   }
 
   LaunchedEffect(Unit) { refreshStep() }
 
   MaterialTheme {
-    Column(
-      modifier = Modifier.fillMaxSize().padding(16.dp),
-      verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
+    Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
       Image(
         painter = painterResource(id = R.drawable.lobsterd_logo),
-        contentDescription = "Lobsterd logo",
-        modifier = Modifier.fillMaxWidth().height(180.dp),
+        contentDescription = "logo",
+        modifier = Modifier.fillMaxWidth().height(170.dp),
         contentScale = ContentScale.Crop
       )
-
       Text("OpenClaw Mobile", style = MaterialTheme.typography.headlineMedium)
 
       Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
           Text("Estado: $status")
           Text("Paso actual: ${buttonLabel(step)}")
-          LinearProgressIndicator(progress = { progress }, modifier = Modifier.fillMaxWidth())
-          Text("Progreso: ${(progress * 100).toInt()}%")
+
+          Text("Bridge ${(pBridge * 100).toInt()}%")
+          LinearProgressIndicator(progress = { pBridge }, modifier = Modifier.fillMaxWidth())
+
+          Text("Ubuntu ${(pUbuntu * 100).toInt()}%")
+          LinearProgressIndicator(progress = { pUbuntu }, modifier = Modifier.fillMaxWidth())
+
+          Text("OpenClaw ${(pOpenclaw * 100).toInt()}%")
+          LinearProgressIndicator(progress = { pOpenclaw }, modifier = Modifier.fillMaxWidth())
         }
       }
 
@@ -280,60 +262,58 @@ fun App(context: Context) {
         when (step) {
           SetupStep.DOWNLOAD_TERMUX -> {
             openTermuxInstallPage(context)
-            status = "Te abrí la descarga de Termux"
-            progress = 0.10f
+            status = "Te abrí F-Droid/Termux"
           }
           SetupStep.CREATE_BRIDGE -> {
             status = launchBridgeBootstrapInTermux(context)
             scope.launch {
               repeat(20) { i ->
-                delay(3000)
-                progress = 0.33f + (0.30f * (i + 1) / 20f)
+                delay(2500)
+                pBridge = (i + 1) / 20f
                 val up = try { TermuxBridgeClient.health(); true } catch (_: Exception) { false }
                 if (up) {
-                  step = SetupStep.INSTALL_OPENCLAW
+                  pBridge = 1f
+                  step = SetupStep.INSTALL_STACK
                   status = "Bridge activo ✅"
-                  progress = 0.66f
                   return@launch
                 }
               }
-              status = "Bridge no inició automáticamente. Reabre Termux y reintenta"
+              status = "Bridge no activo aún. Reabre Termux y reintenta."
             }
           }
-          SetupStep.INSTALL_OPENCLAW -> {
+          SetupStep.INSTALL_STACK -> {
             scope.launch {
-              status = "Iniciando instalación OpenClaw..."
               try {
-                TermuxBridgeClient.installStart()
-                repeat(120) {
+                TermuxBridgeClient.installAllStart()
+                repeat(180) {
                   delay(2000)
                   val p = TermuxBridgeClient.progress()
-                  val pct = p.optInt("percent", 0)
+                  pBridge = (p.optJSONObject("bridge")?.optInt("percent", 0) ?: 0) / 100f
+                  pUbuntu = (p.optJSONObject("ubuntu")?.optInt("percent", 0) ?: 0) / 100f
+                  pOpenclaw = (p.optJSONObject("openclaw")?.optInt("percent", 0) ?: 0) / 100f
                   val phase = p.optString("phase", "")
                   val detail = p.optString("detail", "")
-                  progress = 0.66f + (0.34f * (pct.coerceIn(0, 100) / 100f))
-                  status = "[$pct%] $phase ${if (detail.isNotBlank()) "- $detail" else ""}"
-                  if (!p.optBoolean("running", false) && pct >= 100 && phase == "done") {
+                  status = "$phase ${if (detail.isNotBlank()) "- $detail" else ""}"
+
+                  if (!p.optBoolean("running", false) && phase == "done") {
                     step = SetupStep.DONE
-                    progress = 1f
-                    status = "OpenClaw instalado ✅"
+                    status = "Instalación completa ✅"
                     return@launch
                   }
                   if (!p.optBoolean("running", false) && phase == "error") {
-                    status = "Error en instalación: $detail"
+                    step = SetupStep.CREATE_BRIDGE
+                    status = "Error instalación: $detail (recrea bridge)"
                     return@launch
                   }
                 }
-                status = "Timeout leyendo progreso de instalación"
+                status = "Timeout leyendo progreso"
               } catch (e: Exception) {
+                step = SetupStep.CREATE_BRIDGE
                 status = "Error instalación: ${e.message}"
               }
             }
           }
-          SetupStep.DONE -> {
-            progress = 1f
-            status = "Todo listo ✅"
-          }
+          SetupStep.DONE -> status = "Todo listo ✅"
         }
       }, modifier = Modifier.fillMaxWidth()) {
         Text(buttonLabel(step))
