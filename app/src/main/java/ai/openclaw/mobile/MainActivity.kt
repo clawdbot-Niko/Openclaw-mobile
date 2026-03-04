@@ -107,6 +107,10 @@ private fun openTermuxInstallPage(context: Context) {
 }
 
 private fun bridgeBootstrapCommand(): String = """
+# hard reset previous bridge/session
+pkill -9 -f bridge_server.py >/dev/null 2>&1 || true
+rm -f ~/openclaw-mobile/termux/bridge.log ~/openclaw-mobile/termux/bridge_server.py >/dev/null 2>&1 || true
+
 pkg update -y
 apt full-upgrade -y || pkg upgrade -y
 pkg install -y python nodejs proot-distro git cmake make clang pkg-config curl
@@ -373,6 +377,8 @@ fun App(context: Context) {
           }
           SetupStep.CREATE_BRIDGE -> {
             showRestartBridge = false
+            pBridge = 0f; pUbuntu = 0f; pOpenclaw = 0f
+            logsText = "(reiniciando bridge...)"
             status = launchBridgeBootstrapInTermux(context)
             showPermissionFix = status.startsWith("Faltan permisos")
             scope.launch {
@@ -435,10 +441,11 @@ fun App(context: Context) {
 
       if (step != SetupStep.DOWNLOAD_TERMUX) {
         Button(onClick = {
+          pBridge = 0f; pUbuntu = 0f; pOpenclaw = 0f
+          logsText = "(reiniciando bridge...)"
           status = launchBridgeBootstrapInTermux(context)
           showPermissionFix = status.startsWith("Faltan permisos")
           step = SetupStep.CREATE_BRIDGE
-          pBridge = 0.4f
           showRestartBridge = false
         }, modifier = Modifier.fillMaxWidth()) {
           Text("Reiniciar bridge")
