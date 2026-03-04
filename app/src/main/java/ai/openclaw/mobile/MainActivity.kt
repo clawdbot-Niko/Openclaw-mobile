@@ -431,7 +431,7 @@ fun App(context: Context) {
         Text(buttonLabel(step))
       }
 
-      if (showRestartBridge) {
+      if (step != SetupStep.DOWNLOAD_TERMUX) {
         Button(onClick = {
           status = launchBridgeBootstrapInTermux(context)
           showPermissionFix = status.startsWith("Faltan permisos")
