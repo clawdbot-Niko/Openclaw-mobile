@@ -158,7 +158,7 @@ def worker_install_all():
     state['phase']='openclaw'
     state['detail']='Instalando OpenClaw'
     setp('openclaw', 15)
-    c,o,e = run('npm i -g openclaw', 1800)
+    c,o,e = run('npm i -g openclaw --loglevel=error --no-fund --no-audit', 1800)
     if c!=0:
       state.update({'running':False,'phase':'error','detail':e[:300]}); return
     setp('openclaw', 70)
