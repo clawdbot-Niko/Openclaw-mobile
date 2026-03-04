@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
@@ -180,17 +182,38 @@ echo BRIDGE_STARTED
 
 private fun launchBridgeBootstrapInTermux(context: Context): String {
   val bootstrap = bridgeBootstrapCommand()
+  val launch = context.packageManager.getLaunchIntentForPackage("com.termux")
+    ?: return "No se encontró Termux. Instálalo primero."
 
-  // Always copy command and open Termux so user can see full real logs.
+  // Fallback manual (always keep command copied).
   val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
   cm.setPrimaryClip(ClipData.newPlainText("termux_bridge_bootstrap", bootstrap))
 
-  val launch = context.packageManager.getLaunchIntentForPackage("com.termux")
-  return if (launch != null) {
+  return try {
+    // 1) Open Termux
     context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-    "Comando copiado. En Termux pega y ejecuta para ver log real (long-press > Paste)."
-  } else {
-    "No se encontró Termux. Instálalo primero."
+
+    // 2-3) Auto-run command (paste+enter equivalent via RUN_COMMAND)
+    val runIntent = Intent("com.termux.app.RUN_COMMAND").apply {
+      setPackage("com.termux")
+      putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
+      putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", bootstrap))
+      putExtra("com.termux.RUN_COMMAND_BACKGROUND", false)
+      putExtra("com.termux.RUN_COMMAND_WORKDIR", "/data/data/com.termux/files/home")
+    }
+    context.startService(runIntent)
+
+    // 4) Return to app automatically
+    Handler(Looper.getMainLooper()).postDelayed({
+      val back = Intent(context, MainActivity::class.java).apply {
+        addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
+      }
+      context.startActivity(back)
+    }, 1800)
+
+    "Ejecutando bridge automáticamente..."
+  } catch (_: Exception) {
+    "No se pudo auto-ejecutar. Ya copié el comando: abre Termux, pega y Enter."
   }
 }
 
