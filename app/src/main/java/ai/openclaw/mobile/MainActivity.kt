@@ -1,5 +1,7 @@
 package ai.openclaw.mobile
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -107,8 +109,17 @@ private fun openTermuxInstallPage(context: Context) {
   }
 }
 
+private fun bridgeBootstrapCommand(): String =
+  "pkg update -y && pkg install -y git python && cd ~ && (test -d openclaw-mobile || git clone https://github.com/clawdbot-Niko/Openclaw-mobile.git openclaw-mobile) && cd ~/openclaw-mobile/termux && chmod +x *.sh && ./start_bridge.sh"
+
+private fun copyBridgeCommand(context: Context) {
+  val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+  cm.setPrimaryClip(ClipData.newPlainText("bridge_command", bridgeBootstrapCommand()))
+  Toast.makeText(context, "Comando de bridge copiado", Toast.LENGTH_SHORT).show()
+}
+
 private fun launchBridgeBootstrapInTermux(context: Context): String {
-  val bootstrap = "pkg update -y && pkg install -y git python && cd ~ && (test -d openclaw-mobile || git clone https://github.com/clawdbot-Niko/Openclaw-mobile.git openclaw-mobile) && cd ~/openclaw-mobile/termux && chmod +x *.sh && ./start_bridge.sh"
+  val bootstrap = bridgeBootstrapCommand()
   return try {
     val runIntent = Intent("com.termux.app.RUN_COMMAND").apply {
       setPackage("com.termux")
@@ -196,6 +207,18 @@ fun App(context: Context) {
           }
           SetupStep.CREATE_BRIDGE -> {
             status = launchBridgeBootstrapInTermux(context)
+            scope.launch {
+              repeat(12) {
+                kotlinx.coroutines.delay(3000)
+                val up = try { TermuxBridgeClient.health(); true } catch (_: Exception) { false }
+                if (up) {
+                  step = SetupStep.INSTALL_OPENCLAW
+                  status = "Bridge activo ✅"
+                  return@launch
+                }
+              }
+              status = "No inició bridge automático. Usa 'Copiar comando bridge' y pégalo en Termux."
+            }
           }
           SetupStep.INSTALL_OPENCLAW -> {
             scope.launch {
@@ -213,6 +236,12 @@ fun App(context: Context) {
         }
       }, modifier = Modifier.fillMaxWidth()) {
         Text(buttonLabel(step))
+      }
+
+      if (step == SetupStep.CREATE_BRIDGE) {
+        Button(onClick = { copyBridgeCommand(context) }, modifier = Modifier.fillMaxWidth()) {
+          Text("Copiar comando bridge")
+        }
       }
 
       Button(onClick = { refreshStep() }, modifier = Modifier.fillMaxWidth()) {
