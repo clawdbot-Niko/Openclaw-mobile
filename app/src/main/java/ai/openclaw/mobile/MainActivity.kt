@@ -155,7 +155,7 @@ private fun launchBridgeBootstrapInTermux(context: Context): String {
   val launch = context.packageManager.getLaunchIntentForPackage("com.termux")
     ?: return "No se encontró Termux. Instálalo primero."
 
-  // Fallback manual (always keep command copied).
+  // Always copy the bootstrap so we can fall back to manual paste.
   val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
   cm.setPrimaryClip(ClipData.newPlainText("termux_bridge_bootstrap", bootstrap))
 
@@ -163,9 +163,9 @@ private fun launchBridgeBootstrapInTermux(context: Context): String {
     // 1) Open Termux
     context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
-    // 2-3) Auto-run command (paste+enter equivalent via RUN_COMMAND)
-    // NOTE: use an explicit service intent for Android 8+ reliability.
+    // 2) Auto-run command via RUN_COMMAND (may fail if Termux blocks external execution)
     val runIntent = Intent("com.termux.app.RUN_COMMAND").apply {
+      // Explicit service intent for Android 8+ reliability.
       setClassName("com.termux", "com.termux.app.RunCommandService")
       putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
       putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", bootstrap))
@@ -174,7 +174,7 @@ private fun launchBridgeBootstrapInTermux(context: Context): String {
     }
     context.startService(runIntent)
 
-    // 4) Return to app automatically
+    // 3) Return to app automatically
     Handler(Looper.getMainLooper()).postDelayed({
       val back = Intent(context, MainActivity::class.java).apply {
         addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -184,8 +184,9 @@ private fun launchBridgeBootstrapInTermux(context: Context): String {
 
     "Ejecutando bridge automáticamente..."
   } catch (_: Exception) {
-    openAppSettings(context, "com.termux")
-    "Faltan permisos para ejecutar comandos automáticos en Termux. Actívalos en Ajustes > Termux y habilita ejecución externa (allow-external-apps), luego reintenta."
+    // Manual fallback: user pastes from clipboard.
+    context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+    "FALLBACK_MANUAL_PASTE\n\nNo pude ejecutar el comando automáticamente en Termux (permiso/ajuste).\n\nYa copié el comando al portapapeles.\n\n1) Se abrirá Termux\n2) Deja presionado dentro de la terminal\n3) Toca PEGAR\n4) Presiona ENTER\n5) Regresa a la app y toca 'Revisar estado'"
   }
 }
 
@@ -321,7 +322,7 @@ fun App(context: Context) {
             pBridge = 0f; pUbuntu = 0f; pOpenclaw = 0f
             logsText = "(reiniciando bridge...)"
             status = launchBridgeBootstrapInTermux(context)
-            showPermissionFix = status.startsWith("Faltan permisos")
+            showPermissionFix = status.startsWith("FALLBACK_MANUAL_PASTE")
             scope.launch {
               repeat(20) { i ->
                 delay(2500)
@@ -385,7 +386,7 @@ fun App(context: Context) {
           pBridge = 0f; pUbuntu = 0f; pOpenclaw = 0f
           logsText = "(reiniciando bridge...)"
           status = launchBridgeBootstrapInTermux(context)
-          showPermissionFix = status.startsWith("Faltan permisos")
+          showPermissionFix = status.startsWith("FALLBACK_MANUAL_PASTE")
           step = SetupStep.CREATE_BRIDGE
           showRestartBridge = false
         }, modifier = Modifier.fillMaxWidth()) {
@@ -394,11 +395,29 @@ fun App(context: Context) {
       }
 
       if (showPermissionFix) {
-        Button(onClick = {
-          openAppSettings(context, "com.termux")
-          status = "Activa permisos y allow-external-apps en Termux, luego vuelve y reintenta."
-        }, modifier = Modifier.fillMaxWidth()) {
-          Text("Abrir permisos de Termux")
+        Card(modifier = Modifier.fillMaxWidth()) {
+          Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("Acción manual requerida", style = MaterialTheme.typography.titleMedium)
+            Text(
+              "Ya copié el comando al portapapeles.\n\n" +
+                "1) Abrir Termux\n" +
+                "2) Deja presionado dentro de la terminal\n" +
+                "3) Toca PEGAR\n" +
+                "4) Presiona ENTER\n" +
+                "5) Regresa a la app y toca 'Revisar estado'"
+            )
+            Button(onClick = {
+              val launch = context.packageManager.getLaunchIntentForPackage("com.termux")
+              if (launch != null) {
+                context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                status = "Termux abierto. Pega el comando y presiona Enter."
+              } else {
+                status = "No se encontró Termux. Instálalo primero."
+              }
+            }, modifier = Modifier.fillMaxWidth()) {
+              Text("Abrir Termux para pegar")
+            }
+          }
         }
       }
 
