@@ -108,7 +108,7 @@ private fun openTermuxInstallPage(context: Context) {
 
 private fun bridgeBootstrapCommand(): String = """
 pkg update -y
-pkg install -y python nodejs proot-distro git cmake make clang pkg-config
+pkg install -y python nodejs proot-distro git cmake make clang pkg-config curl
 pkg install -y nodejs-lts || true
 mkdir -p ~/openclaw-mobile/termux
 cat > ~/openclaw-mobile/termux/bridge_server.py <<'PY'
@@ -166,7 +166,7 @@ def worker_install_all():
     state['phase']='openclaw'
     state['detail']='Instalando OpenClaw'
     setp('openclaw', 15)
-    c,o,e = run('npm config delete jobs || true; npm_config_jobs=4 npm i -g openclaw --loglevel=error --no-fund --no-audit', 1800)
+    c,o,e = run('curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard', 1800)
     if c!=0:
       state.update({'running':False,'phase':'error','detail':compact_error(e)}); return
     setp('openclaw', 70)
