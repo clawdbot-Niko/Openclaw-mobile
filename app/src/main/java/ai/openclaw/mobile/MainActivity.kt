@@ -108,14 +108,21 @@ private fun openTermuxInstallPage(context: Context) {
 
 private fun bridgeBootstrapCommand(): String = """
 # OpenClaw Mobile bootstrap (Termux)
+# - enables external execution for future one-tap runs
 # - installs minimal deps
-# - clones/updates the repo under ~/openclaw-mobile
+# - downloads repo snapshot (no git credentials)
 # - starts the bridge server (logs persisted to ~/openclaw-mobile/termux/install.log)
 
 set -e
 
+# 0) Enable external app execution in Termux (required for RUN_COMMAND).
+#    This takes effect after settings reload.
+mkdir -p "${'$'}HOME/.termux"
+echo "allow-external-apps=true" >> "${'$'}HOME/.termux/termux.properties"
+termux-reload-settings >/dev/null 2>&1 || true
+
 pkg update -y
-pkg install -y python curl tar
+pkg install -y python curl tar termux-tools
 
 # Fetch repo without git credentials/prompts (works for public repos)
 rm -rf "${'$'}HOME/openclaw-mobile" || true
