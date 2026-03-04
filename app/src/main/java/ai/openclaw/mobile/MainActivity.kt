@@ -5,6 +5,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.provider.Settings
 import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
@@ -180,6 +181,15 @@ nohup python ~/openclaw-mobile/termux/bridge_server.py > ~/openclaw-mobile/termu
 echo BRIDGE_STARTED
 """.trimIndent()
 
+private fun openAppSettings(context: Context, packageName: String) {
+  try {
+    context.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+      data = Uri.parse("package:$packageName")
+      addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    })
+  } catch (_: Exception) {}
+}
+
 private fun launchBridgeBootstrapInTermux(context: Context): String {
   val bootstrap = bridgeBootstrapCommand()
   val launch = context.packageManager.getLaunchIntentForPackage("com.termux")
@@ -213,7 +223,8 @@ private fun launchBridgeBootstrapInTermux(context: Context): String {
 
     "Ejecutando bridge automáticamente..."
   } catch (_: Exception) {
-    "No se pudo auto-ejecutar. Ya copié el comando: abre Termux, pega y Enter."
+    openAppSettings(context, "com.termux")
+    "Faltan permisos para ejecutar comandos automáticos en Termux. Actívalos en Ajustes > Termux y habilita ejecución externa (allow-external-apps), luego reintenta."
   }
 }
 
@@ -226,6 +237,7 @@ fun App(context: Context) {
   var pUbuntu by remember { mutableFloatStateOf(0f) }
   var pOpenclaw by remember { mutableFloatStateOf(0f) }
   var showRestartBridge by remember { mutableStateOf(false) }
+  var showPermissionFix by remember { mutableStateOf(false) }
 
   fun buttonLabel(s: SetupStep) = when (s) {
     SetupStep.DOWNLOAD_TERMUX -> "1) Descargar Termux"
@@ -241,6 +253,7 @@ fun App(context: Context) {
         status = "No se detecta Termux"
         pBridge = 0f
         showRestartBridge = false
+        showPermissionFix = false
         return@launch
       }
       val up = try { TermuxBridgeClient.health(); true } catch (_: Exception) { false }
@@ -255,6 +268,7 @@ fun App(context: Context) {
       step = SetupStep.INSTALL_STACK
       status = "Bridge activo ✅"
       showRestartBridge = false
+      showPermissionFix = false
     }
   }
 
@@ -295,6 +309,7 @@ fun App(context: Context) {
           SetupStep.CREATE_BRIDGE -> {
             showRestartBridge = false
             status = launchBridgeBootstrapInTermux(context)
+            showPermissionFix = status.startsWith("Faltan permisos")
             scope.launch {
               repeat(20) { i ->
                 delay(2500)
@@ -304,6 +319,7 @@ fun App(context: Context) {
                   pBridge = 1f
                   step = SetupStep.INSTALL_STACK
                   status = "Bridge activo ✅"
+                  showPermissionFix = false
                   return@launch
                 }
               }
@@ -355,11 +371,21 @@ fun App(context: Context) {
       if (showRestartBridge) {
         Button(onClick = {
           status = launchBridgeBootstrapInTermux(context)
+          showPermissionFix = status.startsWith("Faltan permisos")
           step = SetupStep.CREATE_BRIDGE
           pBridge = 0.4f
           showRestartBridge = false
         }, modifier = Modifier.fillMaxWidth()) {
           Text("Reiniciar bridge")
+        }
+      }
+
+      if (showPermissionFix) {
+        Button(onClick = {
+          openAppSettings(context, "com.termux")
+          status = "Activa permisos y allow-external-apps en Termux, luego vuelve y reintenta."
+        }, modifier = Modifier.fillMaxWidth()) {
+          Text("Abrir permisos de Termux")
         }
       }
 
