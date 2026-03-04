@@ -15,6 +15,8 @@ import androidx.activity.compose.setContent
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -58,6 +60,7 @@ private object TermuxBridgeClient {
   suspend fun health(): String = get("/health")
   suspend fun installAllStart(): String = post("/install/all/start", "{}")
   suspend fun progress(): JSONObject = JSONObject(get("/progress"))
+  suspend fun logs(): String = get("/logs")
 
   private suspend fun get(path: String): String = withContext(Dispatchers.IO) {
     val conn = URL(base + path).openConnection() as HttpURLConnection
@@ -118,11 +121,23 @@ state = {
   'detail': '',
   'bridge': {'percent': 100},
   'ubuntu': {'percent': 0},
-  'openclaw': {'percent': 0}
+  'openclaw': {'percent': 0},
+  'logs': []
 }
 
+def add_log(msg):
+    try:
+      state['logs'].append(str(msg))
+      if len(state['logs']) > 300:
+        state['logs'] = state['logs'][-300:]
+    except Exception:
+      pass
+
 def run(cmd, timeout=1800):
+    add_log(f'$ {cmd}')
     p = subprocess.run(cmd, shell=True, text=True, capture_output=True, timeout=timeout)
+    if p.stdout: add_log(p.stdout.strip())
+    if p.stderr: add_log(p.stderr.strip())
     return p.returncode, (p.stdout or '').strip(), (p.stderr or '').strip()
 
 def setp(target, pct):
@@ -164,6 +179,7 @@ class H(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path == '/health': return self.sendj(200, {'ok': True, 'service': 'termux-bridge'})
         if self.path == '/progress': return self.sendj(200, state)
+        if self.path == '/logs': return self.sendj(200, {'ok': True, 'logs': '\n'.join(state.get('logs', []))})
         return self.sendj(404, {'error':'not_found'})
 
     def do_POST(self):
@@ -238,6 +254,8 @@ fun App(context: Context) {
   var pOpenclaw by remember { mutableFloatStateOf(0f) }
   var showRestartBridge by remember { mutableStateOf(false) }
   var showPermissionFix by remember { mutableStateOf(false) }
+  var logsText by remember { mutableStateOf("(sin logs aún)") }
+  val logsScroll = rememberScrollState()
 
   fun buttonLabel(s: SetupStep) = when (s) {
     SetupStep.DOWNLOAD_TERMUX -> "1) Descargar Termux"
@@ -274,6 +292,16 @@ fun App(context: Context) {
 
   LaunchedEffect(Unit) { refreshStep() }
 
+  LaunchedEffect(step) {
+    while (true) {
+      try {
+        val j = JSONObject(TermuxBridgeClient.logs())
+        logsText = j.optString("logs", logsText)
+      } catch (_: Exception) {}
+      delay(2000)
+    }
+  }
+
   MaterialTheme {
     Column(modifier = Modifier.fillMaxSize().padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
       Image(
@@ -297,6 +325,26 @@ fun App(context: Context) {
 
           Text("OpenClaw ${(pOpenclaw * 100).toInt()}%")
           LinearProgressIndicator(progress = { pOpenclaw }, modifier = Modifier.fillMaxWidth())
+        }
+      }
+
+      Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+          Text("Logs en tiempo real")
+          Text(
+            logsText.ifBlank { "(sin logs)" },
+            modifier = Modifier
+              .fillMaxWidth()
+              .height(180.dp)
+              .verticalScroll(logsScroll)
+          )
+          Button(onClick = {
+            val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            cm.setPrimaryClip(ClipData.newPlainText("openclaw_logs", logsText))
+            status = "Logs copiados"
+          }, modifier = Modifier.fillMaxWidth()) {
+            Text("Copiar logs")
+          }
         }
       }
 
