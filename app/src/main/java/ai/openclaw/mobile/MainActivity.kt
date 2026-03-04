@@ -256,8 +256,9 @@ private fun launchBridgeBootstrapInTermux(context: Context): String {
     context.startActivity(launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
 
     // 2-3) Auto-run command (paste+enter equivalent via RUN_COMMAND)
+    // NOTE: use an explicit service intent for Android 8+ reliability.
     val runIntent = Intent("com.termux.app.RUN_COMMAND").apply {
-      setPackage("com.termux")
+      setClassName("com.termux", "com.termux.app.RunCommandService")
       putExtra("com.termux.RUN_COMMAND_PATH", "/data/data/com.termux/files/usr/bin/bash")
       putExtra("com.termux.RUN_COMMAND_ARGUMENTS", arrayOf("-lc", bootstrap))
       putExtra("com.termux.RUN_COMMAND_BACKGROUND", false)
