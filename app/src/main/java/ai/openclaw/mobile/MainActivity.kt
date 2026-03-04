@@ -117,15 +117,15 @@ set -e
 pkg update -y
 pkg install -y python git
 
-if [ ! -d "$HOME/openclaw-mobile/.git" ]; then
-  rm -rf "$HOME/openclaw-mobile" || true
-  git clone https://github.com/clawdbot-Niko/Openclaw-mobile.git "$HOME/openclaw-mobile"
+if [ ! -d "${'$'}HOME/openclaw-mobile/.git" ]; then
+  rm -rf "${'$'}HOME/openclaw-mobile" || true
+  git clone https://github.com/clawdbot-Niko/Openclaw-mobile.git "${'$'}HOME/openclaw-mobile"
 else
-  cd "$HOME/openclaw-mobile"
+  cd "${'$'}HOME/openclaw-mobile"
   git pull --rebase || true
 fi
 
-cd "$HOME/openclaw-mobile/termux"
+cd "${'$'}HOME/openclaw-mobile/termux"
 
 pkill -f bridge_server.py >/dev/null 2>&1 || true
 nohup python bridge_server.py >/dev/null 2>&1 &
