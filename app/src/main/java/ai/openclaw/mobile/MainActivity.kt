@@ -115,15 +115,16 @@ private fun bridgeBootstrapCommand(): String = """
 set -e
 
 pkg update -y
-pkg install -y python git
+pkg install -y python curl tar
 
-if [ ! -d "${'$'}HOME/openclaw-mobile/.git" ]; then
-  rm -rf "${'$'}HOME/openclaw-mobile" || true
-  git clone https://github.com/clawdbot-Niko/Openclaw-mobile.git "${'$'}HOME/openclaw-mobile"
-else
-  cd "${'$'}HOME/openclaw-mobile"
-  git pull --rebase || true
-fi
+# Fetch repo without git credentials/prompts (works for public repos)
+rm -rf "${'$'}HOME/openclaw-mobile" || true
+mkdir -p "${'$'}HOME"
+
+curl -L "https://github.com/clawdbot-Niko/Openclaw-mobile/archive/refs/heads/main.tar.gz" \
+  | tar -xz -C "${'$'}HOME"
+
+mv "${'$'}HOME/Openclaw-mobile-main" "${'$'}HOME/openclaw-mobile"
 
 cd "${'$'}HOME/openclaw-mobile/termux"
 
