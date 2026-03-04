@@ -108,6 +108,7 @@ private fun openTermuxInstallPage(context: Context) {
 
 private fun bridgeBootstrapCommand(): String = """
 pkg update -y
+apt full-upgrade -y || pkg upgrade -y
 pkg install -y python nodejs proot-distro git cmake make clang pkg-config curl
 pkg install -y nodejs-lts || true
 mkdir -p ~/openclaw-mobile/termux
