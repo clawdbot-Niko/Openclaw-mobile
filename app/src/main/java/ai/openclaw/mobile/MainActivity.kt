@@ -100,15 +100,36 @@ proot-distro install ubuntu
 # proot-distro login ubuntu
 """.trimIndent()
 
-private fun cmdInstallOpenClawInTermux(): String = """
-# Paso 6 - Instalar OpenClaw (RECOMENDADO: en Termux, no en Ubuntu)
+private fun cmdInstallOpenClawInUbuntu(): String = """
+# Paso 6 - Instalar OpenClaw (DENTRO de Ubuntu/proot)
+# Nota: si más adelante el CLI falla por red en proot, necesitarás correr OpenClaw en Termux.
 set -e
 pkg update -y
-pkg install -y nodejs
-npm i -g openclaw
+pkg install -y proot-distro
 
-# Iniciar login:
-# openclaw onboard
+# Instalación dentro de Ubuntu
+proot-distro login ubuntu -- bash -lc "set -e; apt-get update; apt-get install -y curl ca-certificates git"
+
+# Instalar OpenClaw (usa el installer oficial)
+proot-distro login ubuntu -- bash -lc "curl -fsSL https://openclaw.ai/install.sh | bash -s -- --no-onboard"
+
+# Verificar
+proot-distro login ubuntu -- bash -lc "openclaw --version"
+""".trimIndent()
+
+private fun cmdOpenClawLoginConfigureInUbuntu(): String = """
+# Paso 7 - Login / Config (OpenClaw)
+# Esto abre el flujo de login y luego configuración.
+set -e
+
+# Entrar a Ubuntu (opcional)
+# proot-distro login ubuntu
+
+# Login (OAuth)
+proot-distro login ubuntu -- bash -lc "openclaw onboard"
+
+# Configuración (si tu flujo usa configure)
+proot-distro login ubuntu -- bash -lc "openclaw configure || true"
 """.trimIndent()
 
 @Composable
@@ -225,11 +246,25 @@ fun App(context: Context) {
       )
 
       StepCard(
-        title = "6) Instalar OpenClaw (en Termux)",
-        body = "Copia el comando, abre Termux y pégalo.\n\nNota: en Ubuntu/proot puede fallar por red; por eso es recomendado en Termux.",
+        title = "6) Instalar OpenClaw (en Ubuntu/proot)",
+        body = "Copia el comando, abre Termux y pégalo. Esto instala OpenClaw dentro de Ubuntu (proot-distro).",
         primaryLabel = "Copiar comando",
         onPrimary = {
-          copyToClipboard(context, "install_openclaw", cmdInstallOpenClawInTermux())
+          copyToClipboard(context, "install_openclaw_ubuntu", cmdInstallOpenClawInUbuntu())
+          status = "Comando copiado. Abre Termux y pega."
+        },
+        secondaryLabel = "Abrir Termux",
+        onSecondary = {
+          if (!openTermux(context)) status = "No se encontró Termux instalado."
+        }
+      )
+
+      StepCard(
+        title = "7) Login (OpenClaw) / Config",
+        body = "Copia el comando, abre Termux y pégalo. Esto ejecuta openclaw onboard y luego openclaw configure dentro de Ubuntu.",
+        primaryLabel = "Copiar comando",
+        onPrimary = {
+          copyToClipboard(context, "openclaw_login_config", cmdOpenClawLoginConfigureInUbuntu())
           status = "Comando copiado. Abre Termux y pega."
         },
         secondaryLabel = "Abrir Termux",
